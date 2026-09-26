@@ -201,17 +201,26 @@
                         <!-- 画像/動画プレビュー -->
                         <div id="received-preview-container" class="received-preview-container hidden"></div>
 
+                        <!-- 受信後の保存アクション -->
                         <div class="success-btn-group">
-                            <button id="btn-save-share" class="btn btn-emerald" type="button">
-                                📤 iPadの「ファイル」に保存
+                            <button id="btn-save-custom-location" class="btn btn-emerald btn-lg" type="button">
+                                📁 保存先・フォルダを指定して保存
                             </button>
                             <a id="btn-download-again" class="btn btn-secondary" href="#" download>
-                                💾 直接ダウンロード
+                                💾 ダウンロードフォルダに保存
                             </a>
                             <button id="btn-receive-again" class="btn btn-secondary" type="button">
                                 📷 続けて別のファイルを受信
                             </button>
                         </div>
+                    </div>
+
+                    <!-- 受信設定オプション -->
+                    <div class="receive-options-bar">
+                        <label class="checkbox-label" for="toggle-auto-download">
+                            <input type="checkbox" id="toggle-auto-download" checked>
+                            <span>受信完了時に自動ダウンロードを行う</span>
+                        </label>
                     </div>
 
                 </div>

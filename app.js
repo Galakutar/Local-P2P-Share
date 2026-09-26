@@ -101,9 +101,10 @@
         receivedFilename: document.getElementById('received-filename'),
         receivedFilesize: document.getElementById('received-filesize'),
         receivedPreviewContainer: document.getElementById('received-preview-container'),
-        btnSaveShare: document.getElementById('btn-save-share'),
+        btnSaveCustomLocation: document.getElementById('btn-save-custom-location'),
         btnDownloadAgain: document.getElementById('btn-download-again'),
         btnReceiveAgain: document.getElementById('btn-receive-again'),
+        toggleAutoDownload: document.getElementById('toggle-auto-download'),
 
         // トースト通知
         toast: document.getElementById('toast'),
@@ -665,8 +666,11 @@
         state.lastReceivedBlob = blob;
         state.lastReceivedFileName = name;
 
-        // 自動ダウンロードを試行
-        triggerAutoDownload(blobUrl, name);
+        // 設定で自動ダウンロードが有効な場合のみ自動実行
+        const shouldAutoDownload = DOM.toggleAutoDownload ? DOM.toggleAutoDownload.checked : true;
+        if (shouldAutoDownload) {
+            triggerAutoDownload(blobUrl, name);
+        }
 
         // UI表示更新
         DOM.receiveProgressBox.classList.add('hidden');
@@ -713,12 +717,35 @@
         } catch (e) {}
     }
 
-    // iPad / iPhone 向けネイティブファイル保存（Web Share API）
-    async function handleSaveShare() {
+    // 📁 保存先・フォルダをユーザーが指定して保存（PC: showSaveFilePicker, iPad/iPhone: Web Share）
+    async function handleSaveCustomLocation() {
         if (!state.lastReceivedBlob) return;
         const blob = state.lastReceivedBlob;
         const filename = state.lastReceivedFileName || 'downloaded_file';
 
+        // 1. PC（Chrome/Edgeなど）: File System Access API でエクスプローラー/Finderの保存先ダイアログを開く
+        if ('showSaveFilePicker' in window) {
+            try {
+                const extension = filename.includes('.') ? '.' + filename.split('.').pop() : '';
+                const handle = await window.showSaveFilePicker({
+                    suggestedName: filename,
+                    types: [{
+                        description: '受信ファイル',
+                        accept: { [blob.type || 'application/octet-stream']: [extension || '.*'] }
+                    }]
+                });
+                const writable = await handle.createWritable();
+                await writable.write(blob);
+                await writable.close();
+                showNotice('✅ 指定した場所にファイルを保存しました！', 3000);
+                return;
+            } catch (err) {
+                if (err.name === 'AbortError') return; // ユーザーがキャンセル
+                console.warn('showSaveFilePicker failed, trying fallback:', err);
+            }
+        }
+
+        // 2. iPad / iPhone: Web Share API で「ファイルに保存」シートを開く（iCloudや任意のフォルダを選択可能）
         try {
             const file = new File([blob], filename, { type: blob.type });
             if (navigator.canShare && navigator.canShare({ files: [file] })) {
@@ -730,12 +757,14 @@
                 return;
             }
         } catch (e) {
+            if (e.name === 'AbortError') return; // ユーザーがキャンセル
             console.log('Share canceled or not supported');
         }
 
-        // フォールバック：直接ダウンロード
+        // 3. フォールバック：通常のダウンロード
         const url = URL.createObjectURL(blob);
         triggerAutoDownload(url, filename);
+        showNotice('💾 ダウンロードフォルダに保存しました');
     }
 
     function resetReceiverUI() {
@@ -847,9 +876,9 @@
             startCamera();
         });
 
-        // iPad向けファイル保存ボタン
-        if (DOM.btnSaveShare) {
-            DOM.btnSaveShare.addEventListener('click', handleSaveShare);
+        // 保存先指定ボタン（PC: showSaveFilePicker, iPad/iPhone: Web Share）
+        if (DOM.btnSaveCustomLocation) {
+            DOM.btnSaveCustomLocation.addEventListener('click', handleSaveCustomLocation);
         }
 
         // アプリQRモーダル

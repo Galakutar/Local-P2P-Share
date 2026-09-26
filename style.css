@@ -690,9 +690,40 @@ body {
     color: #fda4af;
 }
 
+.btn-lg {
+    padding: 12px 22px;
+    font-size: 15px;
+    width: 100%;
+    max-width: 380px;
+}
+
 .btn-sm {
     padding: 8px 14px;
     font-size: 12.5px;
+}
+
+/* 受信設定オプション */
+.receive-options-bar {
+    display: flex;
+    justify-content: center;
+    padding-top: 4px;
+}
+
+.checkbox-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 13px;
+    color: var(--text-sub);
+    cursor: pointer;
+    user-select: none;
+}
+
+.checkbox-label input[type="checkbox"] {
+    width: 16px;
+    height: 16px;
+    accent-color: var(--accent-emerald-light);
+    cursor: pointer;
 }
 
 /* ==================== 📱 アプリQR モーダル ==================== */
