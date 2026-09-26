@@ -86,7 +86,16 @@
         btnReceiveAgain: document.getElementById('btn-receive-again'),
 
         // トースト通知
-        toast: document.getElementById('toast')
+        toast: document.getElementById('toast'),
+
+        // 📱 アプリ起動用QRモーダル
+        btnOpenAppQr: document.getElementById('btn-open-app-qr'),
+        btnFooterAppQr: document.getElementById('btn-footer-app-qr'),
+        appQrModal: document.getElementById('app-qr-modal'),
+        btnCloseAppQr: document.getElementById('btn-close-app-qr'),
+        appUrlQrTarget: document.getElementById('app-url-qr-target'),
+        appShareUrlInput: document.getElementById('app-share-url-input'),
+        btnCopyAppUrl: document.getElementById('btn-copy-app-url')
     };
 
     // =========================================================================
@@ -661,13 +670,92 @@
                 }
             }
         });
+
+        // 📱 アプリ起動用QRモーダルのイベント
+        if (el.btnOpenAppQr) {
+            el.btnOpenAppQr.addEventListener('click', openAppQrModal);
+        }
+        if (el.btnFooterAppQr) {
+            el.btnFooterAppQr.addEventListener('click', openAppQrModal);
+        }
+        if (el.btnCloseAppQr) {
+            el.btnCloseAppQr.addEventListener('click', closeAppQrModal);
+        }
+        if (el.appQrModal) {
+            el.appQrModal.addEventListener('click', (e) => {
+                if (e.target === el.appQrModal) closeAppQrModal();
+            });
+        }
+        if (el.btnCopyAppUrl) {
+            el.btnCopyAppUrl.addEventListener('click', copyAppShareUrl);
+        }
+    }
+
+    // =========================================================================
+    // 📱 アプリ共有用 QRコード機能
+    // =========================================================================
+    const APP_SHARE_URL = 'https://galakutar.github.io/Local-P2P-Share/';
+
+    function renderAppShareQr() {
+        if (!el.appUrlQrTarget) return;
+        el.appUrlQrTarget.innerHTML = '';
+        
+        // 現在のURL（GitHub PagesのURLまたはローカルURL）
+        const currentUrl = window.location.href.startsWith('http') ? window.location.href : APP_SHARE_URL;
+        if (el.appShareUrlInput) {
+            el.appShareUrlInput.value = currentUrl;
+        }
+
+        const size = Math.min(window.innerWidth - 100, 200);
+        try {
+            new QRCode(el.appUrlQrTarget, {
+                text: currentUrl,
+                width: size,
+                height: size,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        } catch (e) {
+            console.error('App QR creation failed:', e);
+        }
+    }
+
+    function openAppQrModal() {
+        if (!el.appQrModal) return;
+        renderAppShareQr();
+        el.appQrModal.classList.remove('hidden');
+    }
+
+    function closeAppQrModal() {
+        if (!el.appQrModal) return;
+        el.appQrModal.classList.add('hidden');
+    }
+
+    async function copyAppShareUrl() {
+        const urlToCopy = el.appShareUrlInput ? el.appShareUrlInput.value : APP_SHARE_URL;
+        try {
+            await navigator.clipboard.writeText(urlToCopy);
+            showNotice('🔗 アプリのURLをクリップボードにコピーしました！');
+        } catch (e) {
+            if (el.appShareUrlInput) {
+                el.appShareUrlInput.select();
+                document.execCommand('copy');
+                showNotice('🔗 アプリのURLをコピーしました！');
+            }
+        }
     }
 
     // 初期化実行
-    if (document.readyState === 'loading') {
-        document.addEventListener('DOMContentLoaded', bindEvents);
-    } else {
+    function init() {
         bindEvents();
+        renderAppShareQr();
+    }
+
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', init);
+    } else {
+        init();
     }
 
 })();

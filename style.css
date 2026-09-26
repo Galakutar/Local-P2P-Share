@@ -619,6 +619,188 @@ body {
     transform: scale(0.97);
 }
 
+/* ヘッダー右側アクション */
+.header-right-actions {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.btn-app-qr {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    padding: 6px 12px;
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.2), rgba(99, 102, 241, 0.25));
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    border-radius: 999px;
+    color: var(--accent-blue-light);
+    font-size: 12px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s ease;
+}
+
+.btn-app-qr:hover {
+    background: linear-gradient(135deg, rgba(56, 189, 248, 0.35), rgba(99, 102, 241, 0.4));
+    transform: translateY(-1px);
+    box-shadow: 0 4px 12px rgba(56, 189, 248, 0.3);
+}
+
+.footer-link-btn {
+    background: transparent;
+    border: none;
+    color: var(--accent-blue-light);
+    font-size: 12px;
+    cursor: pointer;
+    margin-top: 4px;
+    text-decoration: underline;
+}
+
+/* ==================== 📱 アプリQR モーダル ==================== */
+.modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(0, 0, 0, 0.75);
+    backdrop-filter: blur(6px);
+    -webkit-backdrop-filter: blur(6px);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 16px;
+    z-index: 2000;
+    animation: fadeIn 0.2s ease;
+}
+
+.modal-card {
+    position: relative;
+    background: #111827;
+    border: 1px solid rgba(56, 189, 248, 0.4);
+    border-radius: var(--radius-lg);
+    padding: 24px 20px;
+    width: 100%;
+    max-width: 440px;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.8), 0 0 30px rgba(56, 189, 248, 0.2);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 14px;
+    text-align: center;
+    animation: popUp 0.25s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes popUp {
+    from { opacity: 0; transform: scale(0.92); }
+    to { opacity: 1; transform: scale(1); }
+}
+
+.modal-close-btn {
+    position: absolute;
+    top: 12px;
+    right: 14px;
+    background: rgba(255, 255, 255, 0.1);
+    border: none;
+    color: var(--text-sub);
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    font-size: 14px;
+    font-weight: 700;
+    cursor: pointer;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: all 0.15s ease;
+}
+
+.modal-close-btn:hover {
+    background: rgba(244, 63, 94, 0.2);
+    color: #ffffff;
+}
+
+.modal-header {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 6px;
+}
+
+.modal-icon-badge {
+    font-size: 32px;
+}
+
+.modal-title {
+    font-size: 18px;
+    font-weight: 800;
+    background: linear-gradient(135deg, #ffffff, #93c5fd);
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+}
+
+.modal-desc {
+    font-size: 12.5px;
+    color: var(--text-sub);
+}
+
+.modal-qr-container {
+    background: #ffffff;
+    padding: 12px;
+    border-radius: var(--radius-md);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+}
+
+.modal-qr-box canvas, .modal-qr-box img {
+    display: block;
+    max-width: 100%;
+}
+
+.modal-url-box {
+    display: flex;
+    gap: 6px;
+    width: 100%;
+}
+
+.modal-url-input {
+    flex: 1;
+    background: #0f172a;
+    border: 1px solid var(--border-color);
+    border-radius: var(--radius-sm);
+    padding: 8px 12px;
+    color: var(--text-main);
+    font-size: 12px;
+    font-family: monospace;
+    outline: none;
+}
+
+.btn-sm {
+    padding: 8px 14px;
+    font-size: 12.5px;
+}
+
+.modal-guide-steps {
+    text-align: left;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px solid rgba(255, 255, 255, 0.08);
+    border-radius: var(--radius-sm);
+    padding: 10px 14px;
+    font-size: 11.5px;
+    color: #cbd5e1;
+    line-height: 1.5;
+    width: 100%;
+}
+
+.modal-guide-steps ol {
+    padding-left: 18px;
+    margin-top: 4px;
+}
+
+.modal-guide-steps li {
+    margin-bottom: 2px;
+}
+
 .btn-emerald {
     background: linear-gradient(135deg, #059669, #10b981);
     color: #ffffff;
@@ -651,7 +833,7 @@ body {
     font-size: 13px;
     font-weight: 600;
     box-shadow: 0 8px 24px rgba(0, 0, 0, 0.5);
-    z-index: 1000;
+    z-index: 3000;
 }
 
 /* フッター */
@@ -660,6 +842,10 @@ body {
     padding: 12px 0 6px;
     font-size: 12px;
     color: var(--text-muted);
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 4px;
 }
 
 .hidden {

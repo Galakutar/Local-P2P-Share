@@ -1,0 +1,153 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Local-P2P-Share - アプリ招待用 QRコード</title>
+    <style>
+        body {
+            background-color: #090d16;
+            color: #ffffff;
+            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", sans-serif;
+            display: flex;
+            flex-direction: column;
+            justify-content: center;
+            align-items: center;
+            min-height: 100vh;
+            margin: 0;
+            padding: 16px;
+            box-sizing: border-box;
+            text-align: center;
+        }
+        .card {
+            background: #121926;
+            border: 1px solid rgba(56, 189, 248, 0.3);
+            border-radius: 20px;
+            padding: 26px;
+            max-width: 480px;
+            width: 100%;
+            box-shadow: 0 20px 50px rgba(0, 0, 0, 0.6), 0 0 30px rgba(56, 189, 248, 0.15);
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 14px;
+        }
+        h1 {
+            font-size: 22px;
+            margin: 0;
+            background: linear-gradient(135deg, #38bdf8 0%, #818cf8 50%, #34d399 100%);
+            -webkit-background-clip: text;
+            -webkit-text-fill-color: transparent;
+        }
+        p {
+            font-size: 13px;
+            color: #94a3b8;
+            margin: 0;
+            line-height: 1.4;
+        }
+        .qr-container {
+            background: #ffffff;
+            padding: 14px;
+            border-radius: 16px;
+            display: inline-block;
+            box-shadow: 0 0 24px rgba(56, 189, 248, 0.35);
+        }
+        .qr-container canvas, .qr-container img {
+            display: block;
+            width: 200px;
+            height: 200px;
+        }
+        .url-box {
+            background: rgba(255, 255, 255, 0.05);
+            border: 1px solid rgba(255, 255, 255, 0.1);
+            border-radius: 10px;
+            padding: 8px 12px;
+            font-family: monospace;
+            font-size: 12px;
+            color: #38bdf8;
+            word-break: break-all;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .btn {
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            gap: 6px;
+            padding: 12px 18px;
+            border-radius: 10px;
+            font-size: 14px;
+            font-weight: 700;
+            border: none;
+            cursor: pointer;
+            text-decoration: none;
+            width: 100%;
+            box-sizing: border-box;
+            transition: transform 0.15s ease;
+        }
+        .btn:active {
+            transform: scale(0.97);
+        }
+        .btn-open {
+            background: linear-gradient(135deg, #0284c7, #2563eb);
+            color: #fff;
+            box-shadow: 0 4px 14px rgba(37, 99, 235, 0.4);
+        }
+        .guide-steps {
+            text-align: left;
+            background: rgba(255, 255, 255, 0.03);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+            border-radius: 12px;
+            padding: 12px 16px;
+            font-size: 12px;
+            color: #cbd5e1;
+            line-height: 1.5;
+            width: 100%;
+            box-sizing: border-box;
+        }
+        .guide-steps ol {
+            margin: 0;
+            padding-left: 18px;
+        }
+    </style>
+    <script src="qrcode.min.js"></script>
+</head>
+<body>
+    <div class="card">
+        <h1>📱 Local-P2P-Share を開く</h1>
+        <p>カメラをQRコードにかざすとアプリが起動します！</p>
+
+        <div class="qr-container">
+            <div id="qr-holder"></div>
+        </div>
+
+        <div class="url-box" id="url-text">https://galakutar.github.io/Local-P2P-Share/</div>
+
+        <a class="btn btn-open" href="./index.html">🚀 アプリを開く</a>
+
+        <div class="guide-steps">
+            <strong>📖 開き方の手順：</strong>
+            <ol>
+                <li>iPadやiPhoneの <strong>「カメラ」</strong> を開いてQRコードにかざします。</li>
+                <li>画面に現れる <strong>黄色いリンク</strong> をタップすると開きます。</li>
+                <li>Safariの共有メニューから <strong>「ホーム画面に追加」</strong> すると全画面アプリとして使えます。</li>
+            </ol>
+        </div>
+    </div>
+
+    <script>
+        const appUrl = 'https://galakutar.github.io/Local-P2P-Share/';
+        const holder = document.getElementById('qr-holder');
+        if (typeof QRCode !== 'undefined' && holder) {
+            new QRCode(holder, {
+                text: appUrl,
+                width: 200,
+                height: 200,
+                colorDark: '#000000',
+                colorLight: '#ffffff',
+                correctLevel: QRCode.CorrectLevel.M
+            });
+        }
+    </script>
+</body>
+</html>
