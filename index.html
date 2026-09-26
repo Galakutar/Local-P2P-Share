@@ -3,16 +3,20 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <meta name="description" content="同一Wi-Fi・ローカル環境で直接ファイルを送受信できる完全オフライン対応P2P共有Webアプリ">
+    <meta name="description" content="同一Wi-Fi環境でWebRTCを用いてスマホ・タブレット・PC間で動画や大容量ファイルを高速P2P転送するWebアプリ">
     <meta name="theme-color" content="#0f172a">
-    <title>Local-P2P-Share - 対面型ローカルファイル送受信</title>
+    <meta name="apple-mobile-web-app-capable" content="yes">
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+    <meta name="apple-mobile-web-app-title" content="Local-P2P-Share">
+    <title>Local-P2P-Share - 同一Wi-Fi 高速P2Pファイル転送</title>
 
-    <!-- 完全オフライン対応：外部CDN不要のスタイルシート -->
+    <!-- スタイルシート -->
     <link rel="stylesheet" href="style.css">
 
-    <!-- 同梱のオフラインQRライブラリ -->
+    <!-- 同梱ライブラリ -->
     <script src="qrcode.min.js"></script>
     <script src="jsqr.min.js"></script>
+    <script src="peerjs.min.js"></script>
 </head>
 <body>
     <div class="app-container">
@@ -28,7 +32,7 @@
                 </div>
                 <div>
                     <h1 class="brand-title">Local-P2P-Share</h1>
-                    <p class="brand-subtitle">同一Wi-Fi・対面ファイル送受信（サーバー不要）</p>
+                    <p class="brand-subtitle">同一Wi-Fi・WebRTC 高速ダイレクト転送</p>
                 </div>
             </div>
             <div class="header-right-actions">
@@ -36,9 +40,9 @@
                     <span>📱</span>
                     <span>アプリQR</span>
                 </button>
-                <div class="offline-badge">
+                <div class="p2p-badge">
                     <span class="badge-dot"></span>
-                    <span>完全オフライン</span>
+                    <span>Wi-Fi P2P 高速暗号化</span>
                 </div>
             </div>
         </header>
@@ -62,60 +66,64 @@
             <section id="panel-send" class="panel-section active">
                 <div class="panel-card">
                     <div class="panel-header">
-                        <h2>📤 ファイル送信</h2>
-                        <p class="panel-desc">ファイルを選択すると、受信側が読み取るためのQRコードを表示します（カメラは使いません）。</p>
+                        <h2>📤 ファイル送信 (WebRTC P2P)</h2>
+                        <p class="panel-desc">動画や写真・PDF等を選択すると、1枚の接続用QRコードが表示されます。受信側がスキャンすると同一Wi-Fi内で直接高速送信されます。</p>
                     </div>
 
                     <!-- ファイルドロップゾーン -->
                     <div id="drop-zone" class="drop-zone">
                         <input type="file" id="file-chooser" class="file-input-hidden">
                         <div class="drop-zone-body">
-                            <div class="drop-icon">📁</div>
+                            <div class="drop-icon">🎬</div>
                             <p class="drop-main-text">ここにファイルをドラッグ＆ドロップ</p>
-                            <p class="drop-sub-text">または <span class="link-text">ファイルを選択</span>（画像・PDF・.vpad-button 等）</p>
+                            <p class="drop-sub-text">または <span class="link-text">ファイルを選択</span>（動画・写真・PDF・音声・.vpad-button等 何でもOK）</p>
                         </div>
                     </div>
 
                     <!-- 選択されたファイル情報 -->
                     <div id="file-info-card" class="file-info-card hidden">
-                        <div class="file-info-icon">📄</div>
+                        <div class="file-info-icon" id="file-type-icon">📦</div>
                         <div class="file-info-meta">
                             <div id="file-name" class="file-name">filename.ext</div>
-                            <div id="file-size" class="file-size">0 KB</div>
+                            <div id="file-size" class="file-size">0 MB</div>
                         </div>
-                        <button id="btn-reset-file" class="btn-text-danger" type="button">解除</button>
+                        <button id="btn-reset-file" class="btn-text-danger" type="button">変更</button>
                     </div>
 
-                    <!-- QRコード表示エリア -->
+                    <!-- 接続用QRコード表示エリア（常に1枚のシンプルな静止QR） -->
                     <div id="qr-display-container" class="qr-display-container hidden">
                         <div class="step-guide">
                             <span class="step-badge">1</span>
-                            <span>受信側の端末のカメラで下のQRコードを読み取ってください</span>
+                            <span>受信側のカメラで下の「接続用QRコード」を読み取ってください</span>
                         </div>
 
                         <div class="qr-box">
                             <div id="qrcode-target" class="qrcode-target"></div>
                         </div>
 
-                        <!-- 複数コマ（アニメーションQR）の場合の進捗バー -->
-                        <div id="send-progress-wrapper" class="send-progress-wrapper hidden">
+                        <div class="status-indicator-box">
+                            <div class="pulsing-dot"></div>
+                            <span id="sender-status-text">受信端末の接続を待機しています...（同一Wi-Fi）</span>
+                        </div>
+
+                        <!-- 送信中プログレスバー -->
+                        <div id="send-progress-wrapper" class="progress-box hidden">
+                            <div class="progress-title-row">
+                                <span class="progress-title">⚡ Wi-Fi P2P 高速送信中...</span>
+                                <span id="send-percent" class="progress-percent">0%</span>
+                            </div>
                             <div class="progress-track">
-                                <div id="send-progress-bar" class="progress-fill"></div>
+                                <div id="send-progress-bar" class="progress-fill blue"></div>
                             </div>
                             <div class="progress-labels">
-                                <span id="send-chunk-label">コマ: 1 / 1</span>
-                                <span>高速ループ送信中</span>
+                                <span id="send-status-bytes">0 MB / 0 MB</span>
+                                <span id="send-status-speed">高速転送中</span>
                             </div>
                         </div>
 
-                        <!-- 速度調整バー -->
-                        <div class="speed-controls">
-                            <label for="speed-range">再生速度:</label>
-                            <select id="speed-range" class="custom-select">
-                                <option value="70">⚡ 高速 (70ms)</option>
-                                <option value="120" selected>🚀 標準 (120ms)</option>
-                                <option value="250">🐢 安定 (250ms)</option>
-                            </select>
+                        <!-- 送信完了表示 -->
+                        <div id="send-success-badge" class="send-success-badge hidden">
+                            <span>✅ 送信が正常に完了しました！</span>
                         </div>
                     </div>
                 </div>
@@ -126,12 +134,12 @@
             <section id="panel-receive" class="panel-section">
                 <div class="panel-card">
                     <div class="panel-header">
-                        <h2>📥 ファイル受信</h2>
-                        <p class="panel-desc">送信側の画面に表示されているQRコードをカメラで読み取ると、自動で保存されます。</p>
+                        <h2>📥 ファイル受信 (WebRTC P2P)</h2>
+                        <p class="panel-desc">送信側の接続QRコードを1回カメラで写すと、WebRTCが接続され、動画や大容量ファイルが同一Wi-Fiで直接高速ダウンロードされます。</p>
                     </div>
 
                     <!-- カメラスキャナーエリア -->
-                    <div class="camera-wrapper">
+                    <div class="camera-wrapper" id="camera-section">
                         <div id="scanner-box" class="scanner-box">
                             <video id="camera-feed" playsinline muted autoplay></video>
                             <canvas id="camera-canvas" class="hidden"></canvas>
@@ -141,13 +149,13 @@
                                 <div class="scan-frame">
                                     <div class="scan-laser-line"></div>
                                 </div>
-                                <p class="scan-hint">枠内にQRコードを合わせてください</p>
+                                <p class="scan-hint">送信側の接続QRコードを枠に合わせてください</p>
                             </div>
 
                             <!-- カメラ停止中のプレースホルダー -->
                             <div id="camera-idle" class="camera-idle">
                                 <div class="idle-icon">📷</div>
-                                <p class="idle-text">カメラを起動してスキャンを開始します</p>
+                                <p class="idle-text">カメラを起動して送信側のQRコードをスキャンします</p>
                                 <button id="btn-activate-camera" class="btn btn-emerald" type="button">
                                     カメラを起動する
                                 </button>
@@ -161,41 +169,41 @@
                         <button id="btn-camera-stop" class="btn btn-danger" type="button">⏹️ カメラ停止</button>
                     </div>
 
-                    <!-- 受信プログレス -->
-                    <div id="receive-progress-box" class="receive-progress-box hidden">
+                    <!-- P2P高速受信プログレス -->
+                    <div id="receive-progress-box" class="progress-box hidden">
                         <div class="progress-title-row">
-                            <span id="receive-title" class="receive-title">⚡ 受信中...</span>
-                            <span id="receive-percent" class="receive-percent">0%</span>
+                            <span id="receive-title" class="progress-title">⚡ Wi-Fi P2P 高速受信中...</span>
+                            <span id="receive-percent" class="progress-percent">0%</span>
                         </div>
                         <div class="progress-track">
                             <div id="receive-progress-bar" class="progress-fill emerald"></div>
                         </div>
                         <div class="progress-labels">
-                            <span id="receive-status-chunks">0 / 0 チャンク</span>
-                            <span id="receive-status-size">0 KB</span>
+                            <span id="receive-status-bytes">0 MB / 0 MB</span>
+                            <span id="receive-status-speed">Wi-Fi ダイレクト通信</span>
                         </div>
                     </div>
 
                     <!-- 受信完了カード -->
                     <div id="receive-success-card" class="receive-success-card hidden">
                         <div class="success-check-icon">✓</div>
-                        <h3>🎉 受信＆自動ダウンロード完了！</h3>
-                        <p class="success-sub">ファイルが端末に自動保存されました。</p>
+                        <h3>🎉 高速受信＆自動保存完了！</h3>
+                        <p class="success-sub">ファイルが端末（ダウンロードフォルダ等）に保存されました。</p>
                         
                         <div class="received-meta-box">
-                            <span class="file-icon-lg">📦</span>
-                            <div>
+                            <span class="file-icon-lg" id="received-type-icon">📦</span>
+                            <div class="received-meta-text">
                                 <div id="received-filename" class="received-filename">filename.ext</div>
-                                <div id="received-filesize" class="received-filesize">0 KB</div>
+                                <div id="received-filesize" class="received-filesize">0 MB</div>
                             </div>
                         </div>
 
-                        <!-- 画像の場合はプレビュー -->
-                        <div id="received-image-preview" class="received-image-preview hidden"></div>
+                        <!-- 画像/動画プレビュー -->
+                        <div id="received-preview-container" class="received-preview-container hidden"></div>
 
                         <div class="success-btn-group">
                             <a id="btn-download-again" class="btn btn-emerald" href="#" download>
-                                💾 もう一度保存する
+                                💾 もう一度ダウンロード
                             </a>
                             <button id="btn-receive-again" class="btn btn-secondary" type="button">
                                 📷 続けて別のファイルを受信
@@ -213,7 +221,7 @@
 
         <!-- フッター -->
         <footer class="app-footer">
-            <p>Local-P2P-Share • 学校・対面環境向け 完全サーバーレス</p>
+            <p>Local-P2P-Share • 同一Wi-Fi WebRTC P2P 高速ダイレクト転送</p>
             <button id="btn-footer-app-qr" class="footer-link-btn" type="button">📱 アプリ招待用 QRコードを表示</button>
         </footer>
     </div>
@@ -226,7 +234,7 @@
                 <div class="modal-icon-badge">📱</div>
                 <div>
                     <h3 id="app-qr-modal-title" class="modal-title">iPad / iPhone でアプリを開く</h3>
-                    <p class="modal-desc">カメラをQRコードにかざすとアプリが即座に起動します！</p>
+                    <p class="modal-desc">標準カメラをかざすとアプリが即座に起動します！</p>
                 </div>
             </div>
 
