@@ -1,6 +1,7 @@
 /**
  * Local-P2P-Share - WebRTC DataChannel 高速ファイル転送 コアスクリプト
- * 同一Wi-Fi環境下でスマホ・タブレット・PC間で大容量ファイル（動画・写真・PDF等）を直接高速転送
+ * 同一Wi-Fi環境下で iPhone / iPad / Android / PC 間の相互大容量データ高速転送
+ * iOS Safari のスリープ・シグナリング再接続・生バイナリ転送に完全対応
  */
 
 (function () {
@@ -10,9 +11,14 @@
     // ⚙️ 設定定数
     // =========================================================================
     const CONFIG = {
-        CHUNK_SIZE: 64 * 1024,      // 64KB バイナリチャンク（WebRTC DataChannel最適値）
-        MAX_BUFFERED_AMOUNT: 1024 * 1024, // 1MB バッファバックプレッシャー制御
-        APP_SHARE_URL: 'https://galakutar.github.io/Local-P2P-Share/'
+        CHUNK_SIZE: 64 * 1024,            // 64KB バイナリチャンク（WebRTC最適サイズ）
+        MAX_BUFFERED_AMOUNT: 1024 * 1024, // 1MB 流量制御バッファ上限
+        APP_SHARE_URL: 'https://galakutar.github.io/Local-P2P-Share/',
+        ICE_SERVERS: [
+            { urls: 'stun:stun.l.google.com:19302' },
+            { urls: 'stun:stun1.l.google.com:19302' },
+            { urls: 'stun:stun.cloudflare.com:3478' }
+        ]
     };
 
     // =========================================================================
@@ -39,7 +45,10 @@
         incomingMeta: null,
         receivedChunks: [],
         receivedBytes: 0,
-        startTime: 0
+        startTime: 0,
+
+        // 画面スリープ防止
+        wakeLock: null
     };
 
     // =========================================================================
@@ -148,12 +157,73 @@
     }
 
     function getFileIcon(type, name) {
-        if (type.startsWith('video/')) return '🎬';
-        if (type.startsWith('image/')) return '🖼️';
-        if (type.startsWith('audio/')) return '🎵';
-        if (type.includes('pdf')) return '📕';
+        type = (type || '').toLowerCase();
+        name = (name || '').toLowerCase();
+        if (type.startsWith('video/') || name.endsWith('.mp4') || name.endsWith('.mov') || name.endsWith('.webm')) return '🎬';
+        if (type.startsWith('image/') || name.endsWith('.jpg') || name.endsWith('.png') || name.endsWith('.heic')) return '🖼️';
+        if (type.startsWith('audio/') || name.endsWith('.mp3') || name.endsWith('.wav') || name.endsWith('.m4a')) return '🎵';
+        if (type.includes('pdf') || name.endsWith('.pdf')) return '📕';
         if (name.endsWith('.vpad-button')) return '🎛️';
         return '📄';
+    }
+
+    // 画面スリープ防止
+    async function requestWakeLock() {
+        try {
+            if ('wakeLock' in navigator && !state.wakeLock) {
+                state.wakeLock = await navigator.wakeLock.request('screen');
+                state.wakeLock.addEventListener('release', () => {
+                    state.wakeLock = null;
+                });
+            }
+        } catch (e) {}
+    }
+
+    function releaseWakeLock() {
+        if (state.wakeLock) {
+            state.wakeLock.release().catch(() => {});
+            state.wakeLock = null;
+        }
+    }
+
+    // =========================================================================
+    // 🌐 PeerJS 接続保証ヘルパー（iOS Safariの切断・待機に対応）
+    // =========================================================================
+    function ensurePeerOpen(peer) {
+        return new Promise((resolve, reject) => {
+            if (!peer) return reject(new Error('Peer not initialized'));
+            if (peer.open && !peer.disconnected) {
+                return resolve(peer.id);
+            }
+            if (peer.disconnected) {
+                peer.reconnect();
+            }
+
+            const timer = setTimeout(() => {
+                cleanup();
+                if (peer.open) resolve(peer.id);
+                else reject(new Error('Peer connection timeout'));
+            }, 8000);
+
+            const onOpen = (id) => {
+                cleanup();
+                resolve(id);
+            };
+
+            const onError = (err) => {
+                cleanup();
+                reject(err);
+            };
+
+            function cleanup() {
+                clearTimeout(timer);
+                peer.off('open', onOpen);
+                peer.off('error', onError);
+            }
+
+            peer.on('open', onOpen);
+            peer.on('error', onError);
+        });
     }
 
     // =========================================================================
@@ -172,16 +242,16 @@
             // 受信カメラを停止
             stopCamera();
 
-            // 送信Peerの初期化
-            initSenderPeer();
+            // 送信Peerの準備
+            setupSenderPeer().catch(() => {});
         } else {
             DOM.tabBtnReceive.classList.add('active');
             DOM.tabBtnSend.classList.remove('active');
             DOM.panelReceive.classList.add('active');
             DOM.panelSend.classList.remove('active');
 
-            // 受信カメラを起動
-            initReceiverPeer();
+            // 受信Peerの準備 & カメラ起動
+            setupReceiverPeer().catch(() => {});
             if (!state.cameraStream) {
                 startCamera();
             }
@@ -191,50 +261,43 @@
     // =========================================================================
     // 📤 送信側ロジック（カメラ不使用・ファイル選択 ➜ 1枚の接続QR表示 ➜ 高速WebRTC送信）
     // =========================================================================
-    function initSenderPeer() {
-        if (state.senderPeer && !state.senderPeer.destroyed) return;
+    async function setupSenderPeer() {
+        if (state.senderPeer && !state.senderPeer.destroyed) {
+            if (state.senderPeer.disconnected) {
+                state.senderPeer.reconnect();
+            }
+            return await ensurePeerOpen(state.senderPeer);
+        }
 
         const randomSuffix = Math.random().toString(36).substring(2, 10);
         state.senderPeerId = `p2pshare-${randomSuffix}`;
 
-        try {
-            state.senderPeer = new Peer(state.senderPeerId, {
-                debug: 1,
-                config: {
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' }
-                    ]
-                }
-            });
+        state.senderPeer = new Peer(state.senderPeerId, {
+            debug: 1,
+            config: { iceServers: CONFIG.ICE_SERVERS }
+        });
 
-            state.senderPeer.on('open', (id) => {
-                state.senderPeerId = id;
-                console.log('Sender Peer ready:', id);
-                if (state.selectedFile) {
-                    renderConnectionQR(id);
-                }
-            });
+        state.senderPeer.on('connection', (conn) => {
+            console.log('Incoming WebRTC connection from receiver:', conn);
+            state.sendConnection = conn;
+            handleSenderConnection(conn);
+        });
 
-            state.senderPeer.on('connection', (conn) => {
-                console.log('Receiver connected via WebRTC!', conn);
-                state.sendConnection = conn;
-                handleSenderConnection(conn);
-            });
+        state.senderPeer.on('disconnected', () => {
+            console.warn('Sender peer disconnected, reconnecting...');
+            if (state.senderPeer && !state.senderPeer.destroyed) {
+                state.senderPeer.reconnect();
+            }
+        });
 
-            state.senderPeer.on('error', (err) => {
-                console.warn('Sender peer notice:', err);
-            });
-        } catch (e) {
-            console.error('PeerJS init failed:', e);
-        }
+        return await ensurePeerOpen(state.senderPeer);
     }
 
-    function onFileChosen(file) {
+    async function onFileChosen(file) {
         if (!file) return;
         state.selectedFile = file;
 
-        // UI更新
+        // UI表示更新
         DOM.fileName.textContent = file.name;
         DOM.fileSize.textContent = `${formatBytes(file.size)} • ${file.type || 'データファイル'}`;
         DOM.fileTypeIcon.textContent = getFileIcon(file.type, file.name);
@@ -244,11 +307,16 @@
         DOM.qrDisplayContainer.classList.remove('hidden');
         DOM.sendSuccessBadge.classList.add('hidden');
         DOM.sendProgressWrapper.classList.add('hidden');
-        DOM.senderStatusText.textContent = '受信端末の接続を待機しています...（同一Wi-Fi）';
+        DOM.senderStatusText.textContent = '接続用QRコードを準備しています...';
 
-        initSenderPeer();
-        if (state.senderPeerId) {
-            renderConnectionQR(state.senderPeerId);
+        try {
+            // 送信Peerを確実に接続
+            const peerId = await setupSenderPeer();
+            renderConnectionQR(peerId);
+            DOM.senderStatusText.textContent = '受信端末の接続を待機しています...（同一Wi-Fi）';
+        } catch (e) {
+            console.error('Sender setup error:', e);
+            DOM.senderStatusText.textContent = '接続待機中... カメラでスキャンしてください';
         }
     }
 
@@ -259,7 +327,6 @@
         if (!DOM.qrcodeTarget) return;
         DOM.qrcodeTarget.innerHTML = '';
 
-        // 接続シグナリング用プロトコル文字列
         const connectionPayload = `p2pshare://${peerId}`;
         const qrSize = Math.min(window.innerWidth - 80, 240);
 
@@ -286,16 +353,24 @@
             showNotice('⚡ 受信端末とP2P接続が確立しました！データ送信を開始します');
             DOM.senderStatusText.textContent = '⚡ WebRTC P2P接続中！データを送信中...';
             DOM.sendProgressWrapper.classList.remove('hidden');
+            requestWakeLock();
             startFileTransmission(conn);
+        });
+
+        conn.on('error', (err) => {
+            console.error('Send connection error:', err);
+            showNotice('送信接続エラーが発生しました');
         });
 
         conn.on('close', () => {
             console.log('Send connection closed');
+            releaseWakeLock();
         });
     }
 
     /**
      * WebRTC DataChannelによる大容量バイナリ高速ストリーミング送信
+     * （生ArrayBufferを送信し、iOS Safariのシリアライザバグを完全回避）
      */
     async function startFileTransmission(conn) {
         if (!state.selectedFile || state.isSending) return;
@@ -307,18 +382,18 @@
         let offset = 0;
         const startTime = Date.now();
 
-        // 1. メタデータ送信
-        conn.send({
-            type: 'meta',
-            name: file.name,
-            size: totalSize,
-            mime: file.type || 'application/octet-stream'
-        });
+        try {
+            // 1. メタデータをJSON文字列として送信
+            conn.send(JSON.stringify({
+                type: 'meta',
+                name: file.name,
+                size: totalSize,
+                mime: file.type || 'application/octet-stream'
+            }));
 
-        // 2. チャンク送信ループ（Backpressure制御付き）
-        async function sendNextChunk() {
+            // 2. チャンク送信ループ（生ArrayBufferを送信）
             while (offset < totalSize) {
-                // バッファ詰まり防止（ブラウザがクラッシュしないよう流量制御）
+                // バックプレッシャー（流量制御）
                 if (conn.dataChannel && conn.dataChannel.bufferedAmount > CONFIG.MAX_BUFFERED_AMOUNT) {
                     await new Promise(resolve => setTimeout(resolve, 15));
                     continue;
@@ -327,12 +402,8 @@
                 const slice = file.slice(offset, offset + chunkSize);
                 const arrayBuffer = await slice.arrayBuffer();
 
-                conn.send({
-                    type: 'chunk',
-                    data: arrayBuffer,
-                    offset: offset
-                });
-
+                // 生のArrayBufferを直接送信
+                conn.send(arrayBuffer);
                 offset += arrayBuffer.byteLength;
 
                 // プログレスバー更新
@@ -348,21 +419,21 @@
                 }
             }
 
-            // 3. 完了通知
-            conn.send({ type: 'done' });
+            // 3. 完了通知をJSON文字列として送信
+            conn.send(JSON.stringify({ type: 'done' }));
             state.isSending = false;
 
             DOM.senderStatusText.textContent = '✅ 送信が完了しました！';
             DOM.sendSuccessBadge.classList.remove('hidden');
             triggerChime();
             showNotice(`🎉 「${file.name}」の送信が完了しました！`, 4000);
-        }
-
-        sendNextChunk().catch(err => {
+        } catch (err) {
             console.error('Send failed:', err);
             state.isSending = false;
             showNotice('送信中にエラーが発生しました');
-        });
+        } finally {
+            releaseWakeLock();
+        }
     }
 
     function resetSender() {
@@ -380,34 +451,29 @@
     // =========================================================================
     // 📥 受信側ロジック（QR非表示・カメラで1回スキャン ➜ WebRTC接続 ➜ 高速自動保存）
     // =========================================================================
-    function initReceiverPeer() {
-        if (state.receiverPeer && !state.receiverPeer.destroyed) return;
+    async function setupReceiverPeer() {
+        if (state.receiverPeer && !state.receiverPeer.destroyed) {
+            if (state.receiverPeer.disconnected) {
+                state.receiverPeer.reconnect();
+            }
+            return await ensurePeerOpen(state.receiverPeer);
+        }
 
         const randomSuffix = Math.random().toString(36).substring(2, 10);
         state.receiverPeerId = `p2precv-${randomSuffix}`;
 
-        try {
-            state.receiverPeer = new Peer(state.receiverPeerId, {
-                debug: 1,
-                config: {
-                    iceServers: [
-                        { urls: 'stun:stun.l.google.com:19302' },
-                        { urls: 'stun:stun1.l.google.com:19302' }
-                    ]
-                }
-            });
+        state.receiverPeer = new Peer(state.receiverPeerId, {
+            debug: 1,
+            config: { iceServers: CONFIG.ICE_SERVERS }
+        });
 
-            state.receiverPeer.on('open', (id) => {
-                state.receiverPeerId = id;
-                console.log('Receiver Peer ready:', id);
-            });
+        state.receiverPeer.on('disconnected', () => {
+            if (state.receiverPeer && !state.receiverPeer.destroyed) {
+                state.receiverPeer.reconnect();
+            }
+        });
 
-            state.receiverPeer.on('error', (err) => {
-                console.warn('Receiver peer notice:', err);
-            });
-        } catch (e) {
-            console.error('Receiver PeerJS init failed:', e);
-        }
+        return await ensurePeerOpen(state.receiverPeer);
     }
 
     async function startCamera() {
@@ -495,69 +561,91 @@
     /**
      * 送信側の接続QRをスキャンした瞬間のハンドラ
      */
-    function onConnectionQrScanned(qrData) {
+    async function onConnectionQrScanned(qrData) {
         stopCamera();
         const targetPeerId = qrData.replace('p2pshare://', '').trim();
         if (!targetPeerId) return;
 
-        showNotice('⚡ QRコードを検出！WebRTC P2P接続を開始します...');
+        showNotice('⚡ 接続QRコードを検出！WebRTC P2P接続を開始します...');
         DOM.receiveProgressBox.classList.remove('hidden');
         DOM.receiveTitle.textContent = '⚡ 送信端末へP2P接続中...';
 
-        connectToSender(targetPeerId);
+        await connectToSender(targetPeerId);
     }
 
     /**
      * WebRTCで送信端末へ接続し、データを受信
      */
-    function connectToSender(targetPeerId) {
-        initReceiverPeer();
+    async function connectToSender(targetPeerId) {
+        try {
+            // 受信側Peerが準備できるのを確実に待つ
+            await setupReceiverPeer();
 
-        const conn = state.receiverPeer.connect(targetPeerId, {
-            reliable: true
-        });
+            const conn = state.receiverPeer.connect(targetPeerId, {
+                reliable: true
+            });
 
-        state.receiveConnection = conn;
-        state.receivedChunks = [];
-        state.receivedBytes = 0;
-        state.startTime = Date.now();
+            state.receiveConnection = conn;
+            state.receivedChunks = [];
+            state.receivedBytes = 0;
+            state.startTime = Date.now();
+            requestWakeLock();
 
-        conn.on('open', () => {
-            showNotice('⚡ P2P接続完了！高速データ受信を開始します');
-            DOM.receiveTitle.textContent = '⚡ データを受信中...';
-        });
+            conn.on('open', () => {
+                showNotice('⚡ P2P接続完了！高速データ受信を開始します');
+                DOM.receiveTitle.textContent = '⚡ データを受信中...';
+            });
 
-        conn.on('data', (packet) => {
-            if (packet.type === 'meta') {
-                state.incomingMeta = packet;
-                DOM.receiveTitle.textContent = `⚡ 「${packet.name}」を受信中...`;
-                DOM.receiveStatusBytes.textContent = `0 MB / ${formatBytes(packet.size)}`;
-            } else if (packet.type === 'chunk') {
-                state.receivedChunks.push(packet.data);
-                state.receivedBytes += packet.data.byteLength;
+            conn.on('data', (data) => {
+                // 文字列の場合：メタデータまたは完了通知
+                if (typeof data === 'string') {
+                    try {
+                        const parsed = JSON.parse(data);
+                        if (parsed.type === 'meta') {
+                            state.incomingMeta = parsed;
+                            DOM.receiveTitle.textContent = `⚡ 「${parsed.name}」を受信中...`;
+                            DOM.receiveStatusBytes.textContent = `0 MB / ${formatBytes(parsed.size)}`;
+                        } else if (parsed.type === 'done') {
+                            completeFileReception();
+                        }
+                    } catch (e) {}
+                }
+                // バイナリチャンク（ArrayBuffer）の場合
+                else if (data instanceof ArrayBuffer || (data && data.buffer instanceof ArrayBuffer)) {
+                    const chunk = data instanceof ArrayBuffer ? data : data.buffer;
+                    state.receivedChunks.push(chunk);
+                    state.receivedBytes += chunk.byteLength;
 
-                if (state.incomingMeta) {
-                    const total = state.incomingMeta.size;
-                    const percent = Math.min(100, Math.round((state.receivedBytes / total) * 100));
-                    DOM.receiveProgressBar.style.width = `${percent}%`;
-                    DOM.receivePercent.textContent = `${percent}%`;
-                    DOM.receiveStatusBytes.textContent = `${formatBytes(state.receivedBytes)} / ${formatBytes(total)}`;
+                    if (state.incomingMeta) {
+                        const total = state.incomingMeta.size;
+                        const percent = Math.min(100, Math.round((state.receivedBytes / total) * 100));
+                        DOM.receiveProgressBar.style.width = `${percent}%`;
+                        DOM.receivePercent.textContent = `${percent}%`;
+                        DOM.receiveStatusBytes.textContent = `${formatBytes(state.receivedBytes)} / ${formatBytes(total)}`;
 
-                    const elapsedSec = (Date.now() - state.startTime) / 1000;
-                    if (elapsedSec > 0.5) {
-                        const speed = (state.receivedBytes / (1024 * 1024)) / elapsedSec;
-                        DOM.receiveStatusSpeed.textContent = `速度: ${speed.toFixed(1)} MB/s`;
+                        const elapsedSec = (Date.now() - state.startTime) / 1000;
+                        if (elapsedSec > 0.5) {
+                            const speed = (state.receivedBytes / (1024 * 1024)) / elapsedSec;
+                            DOM.receiveStatusSpeed.textContent = `速度: ${speed.toFixed(1)} MB/s`;
+                        }
                     }
                 }
-            } else if (packet.type === 'done') {
-                completeFileReception();
-            }
-        });
+            });
 
-        conn.on('error', (err) => {
-            console.error('Receive error:', err);
-            showNotice('受信中に接続エラーが発生しました');
-        });
+            conn.on('error', (err) => {
+                console.error('Receive error:', err);
+                showNotice('受信中に接続エラーが発生しました');
+                releaseWakeLock();
+            });
+
+            conn.on('close', () => {
+                releaseWakeLock();
+            });
+        } catch (err) {
+            console.error('Connect to sender failed:', err);
+            showNotice('送信端末への接続に失敗しました。もう一度スキャンしてください');
+            releaseWakeLock();
+        }
     }
 
     /**
@@ -565,6 +653,7 @@
      */
     function completeFileReception() {
         if (!state.incomingMeta) return;
+        releaseWakeLock();
 
         triggerChime();
         if (navigator.vibrate) {
@@ -589,16 +678,17 @@
 
         // プレビュー生成（画像または動画）
         DOM.receivedPreviewContainer.innerHTML = '';
-        if (mime.startsWith('image/')) {
+        if (mime.startsWith('image/') || name.toLowerCase().match(/\.(jpg|jpeg|png|gif|webp|heic)$/)) {
             const img = document.createElement('img');
             img.src = blobUrl;
             img.alt = name;
             DOM.receivedPreviewContainer.appendChild(img);
             DOM.receivedPreviewContainer.classList.remove('hidden');
-        } else if (mime.startsWith('video/')) {
+        } else if (mime.startsWith('video/') || name.toLowerCase().match(/\.(mp4|mov|webm)$/)) {
             const video = document.createElement('video');
             video.src = blobUrl;
             video.controls = true;
+            video.playsInline = true;
             DOM.receivedPreviewContainer.appendChild(video);
             DOM.receivedPreviewContainer.classList.remove('hidden');
         } else {
@@ -739,10 +829,17 @@
         }
         if (DOM.btnCopyAppUrl) DOM.btnCopyAppUrl.addEventListener('click', copyAppShareUrl);
 
-        // 画面非表示時の省電力制御
+        // 画面復帰時のPeer再接続＆省電力制御
         document.addEventListener('visibilitychange', () => {
-            if (document.hidden && state.isScanning) {
-                stopCamera();
+            if (document.hidden) {
+                if (state.isScanning) stopCamera();
+            } else {
+                // 画面復帰時に切断されていたら自動再接続
+                if (state.currentMode === 'send' && state.senderPeer && state.senderPeer.disconnected) {
+                    state.senderPeer.reconnect();
+                } else if (state.currentMode === 'receive' && state.receiverPeer && state.receiverPeer.disconnected) {
+                    state.receiverPeer.reconnect();
+                }
             }
         });
     }
@@ -750,7 +847,7 @@
     // 初期化
     function init() {
         bindEvents();
-        initSenderPeer();
+        setupSenderPeer().catch(() => {});
         renderAppShareQr();
     }
 
