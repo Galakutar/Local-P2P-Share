@@ -1,0 +1,217 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <meta name="description" content="同一Wi-Fi・ローカル環境で直接ファイルを送受信できる完全オフライン対応P2P共有Webアプリ">
+    <meta name="theme-color" content="#0f172a">
+    <title>Local-P2P-Share - 対面型ローカルファイル送受信</title>
+
+    <!-- 完全オフライン対応：外部CDN不要のスタイルシート -->
+    <link rel="stylesheet" href="style.css">
+
+    <!-- 同梱のオフラインQRライブラリ -->
+    <script src="qrcode.min.js"></script>
+    <script src="jsqr.min.js"></script>
+</head>
+<body>
+    <div class="app-container">
+        <!-- ヘッダー -->
+        <header class="app-header">
+            <div class="brand">
+                <div class="brand-icon">
+                    <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2">
+                        <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8"/>
+                        <polyline points="16 6 12 2 8 6"/>
+                        <line x1="12" y1="2" x2="12" y2="15"/>
+                    </svg>
+                </div>
+                <div>
+                    <h1 class="brand-title">Local-P2P-Share</h1>
+                    <p class="brand-subtitle">同一Wi-Fi・対面ファイル送受信（サーバー不要）</p>
+                </div>
+            </div>
+            <div class="offline-badge">
+                <span class="badge-dot"></span>
+                <span>完全オフライン動作</span>
+            </div>
+        </header>
+
+        <!-- モード切替タブ（送信 / 受信の厳密な分離） -->
+        <div class="tab-switcher">
+            <button id="tab-btn-send" class="tab-btn active" type="button">
+                <span class="tab-btn-icon">📤</span>
+                <span class="tab-btn-text">データを送る (送信)</span>
+            </button>
+            <button id="tab-btn-receive" class="tab-btn" type="button">
+                <span class="tab-btn-icon">📥</span>
+                <span class="tab-btn-text">データを受け取る (受信)</span>
+            </button>
+        </div>
+
+        <!-- メイン画面エリア -->
+        <main class="main-area">
+
+            <!-- ==================== 📤 送信モード画面 ==================== -->
+            <section id="panel-send" class="panel-section active">
+                <div class="panel-card">
+                    <div class="panel-header">
+                        <h2>📤 ファイル送信</h2>
+                        <p class="panel-desc">ファイルを選択すると、受信側が読み取るためのQRコードを表示します（カメラは使いません）。</p>
+                    </div>
+
+                    <!-- ファイルドロップゾーン -->
+                    <div id="drop-zone" class="drop-zone">
+                        <input type="file" id="file-chooser" class="file-input-hidden">
+                        <div class="drop-zone-body">
+                            <div class="drop-icon">📁</div>
+                            <p class="drop-main-text">ここにファイルをドラッグ＆ドロップ</p>
+                            <p class="drop-sub-text">または <span class="link-text">ファイルを選択</span>（画像・PDF・.vpad-button 等）</p>
+                        </div>
+                    </div>
+
+                    <!-- 選択されたファイル情報 -->
+                    <div id="file-info-card" class="file-info-card hidden">
+                        <div class="file-info-icon">📄</div>
+                        <div class="file-info-meta">
+                            <div id="file-name" class="file-name">filename.ext</div>
+                            <div id="file-size" class="file-size">0 KB</div>
+                        </div>
+                        <button id="btn-reset-file" class="btn-text-danger" type="button">解除</button>
+                    </div>
+
+                    <!-- QRコード表示エリア -->
+                    <div id="qr-display-container" class="qr-display-container hidden">
+                        <div class="step-guide">
+                            <span class="step-badge">1</span>
+                            <span>受信側の端末のカメラで下のQRコードを読み取ってください</span>
+                        </div>
+
+                        <div class="qr-box">
+                            <div id="qrcode-target" class="qrcode-target"></div>
+                        </div>
+
+                        <!-- 複数コマ（アニメーションQR）の場合の進捗バー -->
+                        <div id="send-progress-wrapper" class="send-progress-wrapper hidden">
+                            <div class="progress-track">
+                                <div id="send-progress-bar" class="progress-fill"></div>
+                            </div>
+                            <div class="progress-labels">
+                                <span id="send-chunk-label">コマ: 1 / 1</span>
+                                <span>高速ループ送信中</span>
+                            </div>
+                        </div>
+
+                        <!-- 速度調整バー -->
+                        <div class="speed-controls">
+                            <label for="speed-range">再生速度:</label>
+                            <select id="speed-range" class="custom-select">
+                                <option value="70">⚡ 高速 (70ms)</option>
+                                <option value="120" selected>🚀 標準 (120ms)</option>
+                                <option value="250">🐢 安定 (250ms)</option>
+                            </select>
+                        </div>
+                    </div>
+                </div>
+            </section>
+
+
+            <!-- ==================== 📥 受信モード画面 ==================== -->
+            <section id="panel-receive" class="panel-section">
+                <div class="panel-card">
+                    <div class="panel-header">
+                        <h2>📥 ファイル受信</h2>
+                        <p class="panel-desc">送信側の画面に表示されているQRコードをカメラで読み取ると、自動で保存されます。</p>
+                    </div>
+
+                    <!-- カメラスキャナーエリア -->
+                    <div class="camera-wrapper">
+                        <div id="scanner-box" class="scanner-box">
+                            <video id="camera-feed" playsinline muted autoplay></video>
+                            <canvas id="camera-canvas" class="hidden"></canvas>
+
+                            <!-- スキャン用ガイド枠 & レーザー -->
+                            <div class="scan-overlay">
+                                <div class="scan-frame">
+                                    <div class="scan-laser-line"></div>
+                                </div>
+                                <p class="scan-hint">枠内にQRコードを合わせてください</p>
+                            </div>
+
+                            <!-- カメラ停止中のプレースホルダー -->
+                            <div id="camera-idle" class="camera-idle">
+                                <div class="idle-icon">📷</div>
+                                <p class="idle-text">カメラを起動してスキャンを開始します</p>
+                                <button id="btn-activate-camera" class="btn btn-emerald" type="button">
+                                    カメラを起動する
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- カメラ操作バー -->
+                    <div id="camera-actions" class="camera-actions hidden">
+                        <button id="btn-camera-flip" class="btn btn-secondary" type="button">🔄 前面/背面 切替</button>
+                        <button id="btn-camera-stop" class="btn btn-danger" type="button">⏹️ カメラ停止</button>
+                    </div>
+
+                    <!-- 受信プログレス -->
+                    <div id="receive-progress-box" class="receive-progress-box hidden">
+                        <div class="progress-title-row">
+                            <span id="receive-title" class="receive-title">⚡ 受信中...</span>
+                            <span id="receive-percent" class="receive-percent">0%</span>
+                        </div>
+                        <div class="progress-track">
+                            <div id="receive-progress-bar" class="progress-fill emerald"></div>
+                        </div>
+                        <div class="progress-labels">
+                            <span id="receive-status-chunks">0 / 0 チャンク</span>
+                            <span id="receive-status-size">0 KB</span>
+                        </div>
+                    </div>
+
+                    <!-- 受信完了カード -->
+                    <div id="receive-success-card" class="receive-success-card hidden">
+                        <div class="success-check-icon">✓</div>
+                        <h3>🎉 受信＆自動ダウンロード完了！</h3>
+                        <p class="success-sub">ファイルが端末に自動保存されました。</p>
+                        
+                        <div class="received-meta-box">
+                            <span class="file-icon-lg">📦</span>
+                            <div>
+                                <div id="received-filename" class="received-filename">filename.ext</div>
+                                <div id="received-filesize" class="received-filesize">0 KB</div>
+                            </div>
+                        </div>
+
+                        <!-- 画像の場合はプレビュー -->
+                        <div id="received-image-preview" class="received-image-preview hidden"></div>
+
+                        <div class="success-btn-group">
+                            <a id="btn-download-again" class="btn btn-emerald" href="#" download>
+                                💾 もう一度保存する
+                            </a>
+                            <button id="btn-receive-again" class="btn btn-secondary" type="button">
+                                📷 続けて別のファイルを受信
+                            </button>
+                        </div>
+                    </div>
+
+                </div>
+            </section>
+
+        </main>
+
+        <!-- 通知トースト -->
+        <div id="toast" class="toast hidden"></div>
+
+        <!-- フッター -->
+        <footer class="app-footer">
+            <p>Local-P2P-Share • 学校・対面環境向け 完全サーバーレス</p>
+        </footer>
+    </div>
+
+    <!-- アプリケーションロジック -->
+    <script src="app.js"></script>
+</body>
+</html>
