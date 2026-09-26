@@ -1,7 +1,7 @@
 /**
  * Local-P2P-Share - WebRTC DataChannel 高速ファイル転送 コアスクリプト
- * 同一Wi-Fi環境下で iPhone / iPad / Android / PC 間の相互大容量データ高速転送
- * iOS Safari のスリープ・シグナリング再接続・生バイナリ転送に完全対応
+ * PC / iPad / iPhone / Android 全端末間の完全双方向P2P通信対応
+ * iPadOS Safari のWebRTC切断・ダウンロード制限・カメラ停止タイミングに完全対応
  */
 
 (function () {
@@ -11,7 +11,7 @@
     // ⚙️ 設定定数
     // =========================================================================
     const CONFIG = {
-        CHUNK_SIZE: 64 * 1024,            // 64KB バイナリチャンク（WebRTC最適サイズ）
+        CHUNK_SIZE: 64 * 1024,            // 64KB バイナリチャンク（WebRTC最適値）
         MAX_BUFFERED_AMOUNT: 1024 * 1024, // 1MB 流量制御バッファ上限
         APP_SHARE_URL: 'https://galakutar.github.io/Local-P2P-Share/',
         ICE_SERVERS: [
@@ -46,6 +46,8 @@
         receivedChunks: [],
         receivedBytes: 0,
         startTime: 0,
+        lastReceivedBlob: null,
+        lastReceivedFileName: '',
 
         // 画面スリープ防止
         wakeLock: null
@@ -99,6 +101,7 @@
         receivedFilename: document.getElementById('received-filename'),
         receivedFilesize: document.getElementById('received-filesize'),
         receivedPreviewContainer: document.getElementById('received-preview-container'),
+        btnSaveShare: document.getElementById('btn-save-share'),
         btnDownloadAgain: document.getElementById('btn-download-again'),
         btnReceiveAgain: document.getElementById('btn-receive-again'),
 
@@ -167,7 +170,6 @@
         return '📄';
     }
 
-    // 画面スリープ防止
     async function requestWakeLock() {
         try {
             if ('wakeLock' in navigator && !state.wakeLock) {
@@ -187,7 +189,7 @@
     }
 
     // =========================================================================
-    // 🌐 PeerJS 接続保証ヘルパー（iOS Safariの切断・待機に対応）
+    // 🌐 PeerJS 接続保証ヘルパー
     // =========================================================================
     function ensurePeerOpen(peer) {
         return new Promise((resolve, reject) => {
@@ -239,8 +241,8 @@
             DOM.panelSend.classList.add('active');
             DOM.panelReceive.classList.remove('active');
 
-            // 受信カメラを停止
-            stopCamera();
+            // 受信カメラの完全停止
+            stopCameraHardware();
 
             // 送信Peerの準備
             setupSenderPeer().catch(() => {});
@@ -259,7 +261,7 @@
     }
 
     // =========================================================================
-    // 📤 送信側ロジック（カメラ不使用・ファイル選択 ➜ 1枚の接続QR表示 ➜ 高速WebRTC送信）
+    // 📤 送信側ロジック（PC / iPhone / iPad 共通）
     // =========================================================================
     async function setupSenderPeer() {
         if (state.senderPeer && !state.senderPeer.destroyed) {
@@ -310,7 +312,6 @@
         DOM.senderStatusText.textContent = '接続用QRコードを準備しています...';
 
         try {
-            // 送信Peerを確実に接続
             const peerId = await setupSenderPeer();
             renderConnectionQR(peerId);
             DOM.senderStatusText.textContent = '受信端末の接続を待機しています...（同一Wi-Fi）';
@@ -320,9 +321,6 @@
         }
     }
 
-    /**
-     * 接続用QRコードを1枚だけ生成・表示（ファイルデータではなく接続IDのみ！）
-     */
     function renderConnectionQR(peerId) {
         if (!DOM.qrcodeTarget) return;
         DOM.qrcodeTarget.innerHTML = '';
@@ -345,13 +343,10 @@
         }
     }
 
-    /**
-     * 受信端末が接続してきた時の高速ファイル送信ハンドラ
-     */
     function handleSenderConnection(conn) {
         conn.on('open', () => {
-            showNotice('⚡ 受信端末とP2P接続が確立しました！データ送信を開始します');
-            DOM.senderStatusText.textContent = '⚡ WebRTC P2P接続中！データを送信中...';
+            showNotice('⚡ 受信端末とP2P接続が開通しました！データを送信中...');
+            DOM.senderStatusText.textContent = '⚡ WebRTC P2P直接接続中！データを送信中...';
             DOM.sendProgressWrapper.classList.remove('hidden');
             requestWakeLock();
             startFileTransmission(conn);
@@ -368,10 +363,6 @@
         });
     }
 
-    /**
-     * WebRTC DataChannelによる大容量バイナリ高速ストリーミング送信
-     * （生ArrayBufferを送信し、iOS Safariのシリアライザバグを完全回避）
-     */
     async function startFileTransmission(conn) {
         if (!state.selectedFile || state.isSending) return;
         state.isSending = true;
@@ -391,9 +382,8 @@
                 mime: file.type || 'application/octet-stream'
             }));
 
-            // 2. チャンク送信ループ（生ArrayBufferを送信）
+            // 2. 生ArrayBufferチャンクを高速送信
             while (offset < totalSize) {
-                // バックプレッシャー（流量制御）
                 if (conn.dataChannel && conn.dataChannel.bufferedAmount > CONFIG.MAX_BUFFERED_AMOUNT) {
                     await new Promise(resolve => setTimeout(resolve, 15));
                     continue;
@@ -402,11 +392,9 @@
                 const slice = file.slice(offset, offset + chunkSize);
                 const arrayBuffer = await slice.arrayBuffer();
 
-                // 生のArrayBufferを直接送信
                 conn.send(arrayBuffer);
                 offset += arrayBuffer.byteLength;
 
-                // プログレスバー更新
                 const percent = Math.min(100, Math.round((offset / totalSize) * 100));
                 DOM.sendProgressBar.style.width = `${percent}%`;
                 DOM.sendPercent.textContent = `${percent}%`;
@@ -419,7 +407,7 @@
                 }
             }
 
-            // 3. 完了通知をJSON文字列として送信
+            // 3. 完了通知
             conn.send(JSON.stringify({ type: 'done' }));
             state.isSending = false;
 
@@ -449,7 +437,7 @@
     }
 
     // =========================================================================
-    // 📥 受信側ロジック（QR非表示・カメラで1回スキャン ➜ WebRTC接続 ➜ 高速自動保存）
+    // 📥 受信側ロジック（iPad / iPhone / PC 共通）
     // =========================================================================
     async function setupReceiverPeer() {
         if (state.receiverPeer && !state.receiverPeer.destroyed) {
@@ -478,10 +466,7 @@
 
     async function startCamera() {
         resetReceiverUI();
-
-        if (state.cameraStream) {
-            stopCamera();
-        }
+        stopCameraHardware();
 
         try {
             const constraints = {
@@ -513,18 +498,22 @@
         }
     }
 
-    function stopCamera() {
+    // スキャン処理の停止（カメラストリームはWebRTC切断防止のため維持）
+    function pauseCameraScan() {
         state.isScanning = false;
         if (state.scanAnimId) {
             cancelAnimationFrame(state.scanAnimId);
             state.scanAnimId = null;
         }
+    }
 
+    // カメラハードウェアの完全停止
+    function stopCameraHardware() {
+        pauseCameraScan();
         if (state.cameraStream) {
             state.cameraStream.getTracks().forEach(t => t.stop());
             state.cameraStream = null;
         }
-
         DOM.cameraFeed.srcObject = null;
         DOM.cameraIdle.classList.remove('hidden');
         DOM.cameraActions.classList.add('hidden');
@@ -550,7 +539,7 @@
 
                 if (result && result.data && result.data.startsWith('p2pshare://')) {
                     onConnectionQrScanned(result.data);
-                    return; // スキャン停止
+                    return;
                 }
             }
         }
@@ -558,27 +547,22 @@
         state.scanAnimId = requestAnimationFrame(scanCameraFeed);
     }
 
-    /**
-     * 送信側の接続QRをスキャンした瞬間のハンドラ
-     */
     async function onConnectionQrScanned(qrData) {
-        stopCamera();
+        // カメラのスキャンループのみ停止（iPadOSのWebRTC切断バグ防止のためハードウェアは維持）
+        pauseCameraScan();
+
         const targetPeerId = qrData.replace('p2pshare://', '').trim();
         if (!targetPeerId) return;
 
-        showNotice('⚡ 接続QRコードを検出！WebRTC P2P接続を開始します...');
+        showNotice('⚡ QRコード認識！送信端末へ接続中...');
         DOM.receiveProgressBox.classList.remove('hidden');
-        DOM.receiveTitle.textContent = '⚡ 送信端末へP2P接続中...';
+        DOM.receiveTitle.textContent = '⚡ 送信端末へP2P接続中...（同一Wi-Fi）';
 
         await connectToSender(targetPeerId);
     }
 
-    /**
-     * WebRTCで送信端末へ接続し、データを受信
-     */
     async function connectToSender(targetPeerId) {
         try {
-            // 受信側Peerが準備できるのを確実に待つ
             await setupReceiverPeer();
 
             const conn = state.receiverPeer.connect(targetPeerId, {
@@ -591,9 +575,23 @@
             state.startTime = Date.now();
             requestWakeLock();
 
+            // 接続タイムアウト監視（3.5秒で接続できない場合再試行）
+            let isOpened = false;
+            const openTimeout = setTimeout(() => {
+                if (!isOpened) {
+                    console.warn('Connection open timed out, retrying connection...');
+                    DOM.receiveTitle.textContent = '📡 通信経路を再試行中...';
+                    if (state.receiverPeer) {
+                        state.receiverPeer.connect(targetPeerId, { reliable: true });
+                    }
+                }
+            }, 3500);
+
             conn.on('open', () => {
-                showNotice('⚡ P2P接続完了！高速データ受信を開始します');
-                DOM.receiveTitle.textContent = '⚡ データを受信中...';
+                isOpened = true;
+                clearTimeout(openTimeout);
+                showNotice('⚡ P2P直接接続が開通しました！データを受信中...');
+                DOM.receiveTitle.textContent = '⚡ 高速データ受信中...';
             });
 
             conn.on('data', (data) => {
@@ -610,7 +608,7 @@
                         }
                     } catch (e) {}
                 }
-                // バイナリチャンク（ArrayBuffer）の場合
+                // 生バイナリチャンク（ArrayBuffer）の場合
                 else if (data instanceof ArrayBuffer || (data && data.buffer instanceof ArrayBuffer)) {
                     const chunk = data instanceof ArrayBuffer ? data : data.buffer;
                     state.receivedChunks.push(chunk);
@@ -634,7 +632,7 @@
 
             conn.on('error', (err) => {
                 console.error('Receive error:', err);
-                showNotice('受信中に接続エラーが発生しました');
+                showNotice('受信接続エラーが発生しました');
                 releaseWakeLock();
             });
 
@@ -643,17 +641,17 @@
             });
         } catch (err) {
             console.error('Connect to sender failed:', err);
-            showNotice('送信端末への接続に失敗しました。もう一度スキャンしてください');
+            showNotice('送信端末への接続に失敗しました');
             releaseWakeLock();
         }
     }
 
-    /**
-     * 受信完了＆自動ダウンロード
-     */
     function completeFileReception() {
         if (!state.incomingMeta) return;
         releaseWakeLock();
+
+        // 転送完了後にカメラハードウェアを完全解放
+        stopCameraHardware();
 
         triggerChime();
         if (navigator.vibrate) {
@@ -664,7 +662,10 @@
         const blob = new Blob(state.receivedChunks, { type: mime || 'application/octet-stream' });
         const blobUrl = URL.createObjectURL(blob);
 
-        // 自動ダウンロード発火
+        state.lastReceivedBlob = blob;
+        state.lastReceivedFileName = name;
+
+        // 自動ダウンロードを試行
         triggerAutoDownload(blobUrl, name);
 
         // UI表示更新
@@ -695,25 +696,53 @@
             DOM.receivedPreviewContainer.classList.add('hidden');
         }
 
-        showNotice(`🎉 「${name}」を高速受信し、自動保存しました！`, 4000);
+        showNotice(`🎉 「${name}」を高速受信しました！`, 4000);
     }
 
     function triggerAutoDownload(url, filename) {
-        const link = document.createElement('a');
-        link.style.display = 'none';
-        link.href = url;
-        link.download = filename;
-        document.body.appendChild(link);
-        link.click();
-        setTimeout(() => {
-            document.body.removeChild(link);
-        }, 300);
+        try {
+            const link = document.createElement('a');
+            link.style.display = 'none';
+            link.href = url;
+            link.download = filename;
+            document.body.appendChild(link);
+            link.click();
+            setTimeout(() => {
+                document.body.removeChild(link);
+            }, 300);
+        } catch (e) {}
+    }
+
+    // iPad / iPhone 向けネイティブファイル保存（Web Share API）
+    async function handleSaveShare() {
+        if (!state.lastReceivedBlob) return;
+        const blob = state.lastReceivedBlob;
+        const filename = state.lastReceivedFileName || 'downloaded_file';
+
+        try {
+            const file = new File([blob], filename, { type: blob.type });
+            if (navigator.canShare && navigator.canShare({ files: [file] })) {
+                await navigator.share({
+                    files: [file],
+                    title: filename
+                });
+                showNotice('✅ iPadのファイルに保存しました！');
+                return;
+            }
+        } catch (e) {
+            console.log('Share canceled or not supported');
+        }
+
+        // フォールバック：直接ダウンロード
+        const url = URL.createObjectURL(blob);
+        triggerAutoDownload(url, filename);
     }
 
     function resetReceiverUI() {
         state.incomingMeta = null;
         state.receivedChunks = [];
         state.receivedBytes = 0;
+        state.lastReceivedBlob = null;
 
         DOM.receiveProgressBox.classList.add('hidden');
         DOM.receiveSuccessCard.classList.add('hidden');
@@ -807,7 +836,7 @@
 
         // カメラ操作
         DOM.btnActivateCamera.addEventListener('click', startCamera);
-        DOM.btnCameraStop.addEventListener('click', stopCamera);
+        DOM.btnCameraStop.addEventListener('click', stopCameraHardware);
         DOM.btnCameraFlip.addEventListener('click', () => {
             state.facingMode = state.facingMode === 'environment' ? 'user' : 'environment';
             startCamera();
@@ -817,6 +846,11 @@
             resetReceiverUI();
             startCamera();
         });
+
+        // iPad向けファイル保存ボタン
+        if (DOM.btnSaveShare) {
+            DOM.btnSaveShare.addEventListener('click', handleSaveShare);
+        }
 
         // アプリQRモーダル
         if (DOM.btnOpenAppQr) DOM.btnOpenAppQr.addEventListener('click', openAppQrModal);
@@ -832,9 +866,8 @@
         // 画面復帰時のPeer再接続＆省電力制御
         document.addEventListener('visibilitychange', () => {
             if (document.hidden) {
-                if (state.isScanning) stopCamera();
+                if (state.isScanning) pauseCameraScan();
             } else {
-                // 画面復帰時に切断されていたら自動再接続
                 if (state.currentMode === 'send' && state.senderPeer && state.senderPeer.disconnected) {
                     state.senderPeer.reconnect();
                 } else if (state.currentMode === 'receive' && state.receiverPeer && state.receiverPeer.disconnected) {
